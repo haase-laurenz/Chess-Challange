@@ -1,5 +1,7 @@
 ﻿﻿﻿using ChessChallenge.API;
 using System;
+using System.Linq;
+using System.Collections.Generic;
 
 public class MyBot : IChessBot
 {   
@@ -24,31 +26,152 @@ public class MyBot : IChessBot
     const int entries = (1 << 20);
     TTEntry[] tt = new TTEntry[entries];
 
-    public int getPstVal(int psq) {
-        return (int)(((psts[psq / 10] >> (6 * (psq % 10))) & 63) - 20) * 8;
+    int GetPieceValue(Piece piece)
+    {
+        // Hier kannst du die Wertigkeiten der verschiedenen Figuren anpassen
+        var pieceValues = new Dictionary<PieceType, int>
+        {
+            { PieceType.None, 0 }, // Leeres Feld hat den Wert 0
+            { PieceType.Pawn, 100 },
+            { PieceType.Knight, 300 },
+            { PieceType.Bishop, 320 },
+            { PieceType.Rook, 500 },
+            { PieceType.Queen, 900 },
+            { PieceType.King, 0 }
+        };
+
+        return pieceValues[piece.PieceType];
+    }
+    int GetPieceCount(Board board){
+
+            return board.GetAllPieceLists()
+            .SelectMany(pieceList => pieceList)
+            .Sum(piece => piece.IsWhite ? GetPieceValue(piece) : -GetPieceValue(piece));
     }
 
     public int Evaluate(Board board) {
-        int mg = 0, eg = 0, phase = 0;
 
-        foreach(bool stm in new[] {true, false}) {
-            for(var p = PieceType.Pawn; p <= PieceType.King; p++) {
-                int piece = (int)p, ind;
-                ulong mask = board.GetPieceBitboard(p, stm);
-                while(mask != 0) {
-                    phase += piecePhase[piece];
-                    ind = 128 * (piece - 1) + BitboardHelper.ClearAndGetIndexOfLSB(ref mask) ^ (stm ? 56 : 0);
-                    mg += getPstVal(ind) + pieceVal[piece];
-                    eg += getPstVal(ind + 64) + pieceVal[piece];
+            int score=GetPieceCount(board)+GetPiecePositioning(board);
+            
+            return board.IsWhiteToMove ? score : -score;
+    }
+
+    int GetPiecePositioning(Board board)
+        {
+            int score = 0;
+            
+            ulong allPiecesBitboard = board.AllPiecesBitboard;
+            int totalPieces = BitboardHelper.GetNumberOfSetBits(allPiecesBitboard);
+
+            double factor = (32.0 - totalPieces) / 32.0;
+
+            int[] knights = { -40, -10, -20, -20, -20, -20, -10, -40,
+                            -40, -20,  0,  0,  0,  0, -20, -40,
+                            -30,  10, 10, 15, 15, 10,  10, -30,
+                            -30,  5, 15, 20, 20, 15,  5, -30,
+                            -30,  0, 15, 20, 20, 15,  0, -30,
+                            -30,  0, 25, 25, 25, 25,  0, -30,
+                            -40, -20,  10,  15,  15,  10, -20, -40,
+                            -40, -30, -20, -10, -10, -20, -30, -40 };
+
+            int[] bishops = { -20, -10, -10, -10, -10, -10, -10, -20,
+                            10, 25, 0, 0, 0, 0, 25, 10,
+                            5, 0, 5, 15, 15, 5, 0, 5,
+                            -10, 25, 30, 10, 10, 30, 25, -10,
+                            -10, 5, 10, 10, 10, 10, 5, -10,
+                            15, 10, 10, 10, 10, 10, 10, 15,
+                            -10, 5, 0, 0, 0, 0, 5, -10,
+                            -20, -10, -10, -10, -10, -10, -10, -20 };
+
+            int[] rooks = { -10, 0, 20, 30, 30, 20, 0, -10,
+                            5, 20, 10, 10, 10, 10, 20, 5,
+                            -5, 0, 0, 0, 0, 0, 0, -5,
+                            -5, 0, 0, 0, 0, 0, 0, -5,
+                            -5, 0, 0, 0, 0, 0, 0, -5,
+                            -5, 0, 0, 0, 0, 0, 0, -5,
+                            30, 30, 30, 30, 30, 30, 30, 30,
+                            20, 20, 20, 20, 20, 20, 20, 20 };
+
+            int[] king = { 0, 30, 20, -30, -40, 20, 30, 20,
+                        -30, -40, -40, -50, -50, -40, -40, -30,
+                        -30, -40, -40, -50, -50, -40, -40, -30,
+                        -30, -40, -40, -50, -50, -40, -40, -30,
+                        -20, -30, -30, -40, -40, -30, -30, -20,
+                        -10, -20, -20, -20, -20, -20, -20, -10,
+                        0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 10, 0, 0, 0, 0, 0 };
+                        
+            int[] king_end = { -50,-40,-30,-20,-20,-30,-40,-50,
+                            -30,-20,-10,  0,  0,-10,-20,-30,
+                            -30,-10, 20, 30, 30, 20,-10,-30,
+                            -30,-10, 30, 40, 40, 30,-10,-30,
+                            -30,-10, 30, 40, 40, 30,-10,-30,
+                            -30,-10, 20, 30, 30, 20,-10,-30,
+                            -30,-30,  0,  0,  0,  0,-30,-30,
+                            -50,-30,-30,-30,-30,-30,-30,-50 };
+
+            int[] pawns = { 0, 0, 0, 0, 0, 0, 0, 0,
+                            20, 20, 30, 10, 10, 20, 20, 20,
+                            15, 15, 20, 30, 30, 20, 15, 15,
+                            15, 0, 10, 50, 50, 10, 0, 15,
+                            0, 0, 0, 40, 40, 0, 0, 20,
+                            20, -5, -10, 0, 0, -10, -5, 5,
+                            5, 10, 10, -20, -20, 10, 10, 5,
+                            0, 0, 0, 0, 0, 0, 0, 0 };
+
+            int[] pawns_end = { 0,  0,  0,  0,  0,  0,  0,  0,
+                            -10, -10, -10, -10, -10, -10, -10, -10,
+                            5, 5, 5, 5, 5,5, 5, 5,
+                            10,  10, 10, 10, 10, 10,  10,  10,
+                            20,  20,  20, 20, 20,  20,  20,  20,
+                            40, 40,40,  40,  40,40, 40,40,
+                            70, 70, 70,70,70, 70, 70, 70,
+                            0,  0,  0,  0,  0,  0,  0,  0 };
+
+            for (int index=0;index<64;index++)
+            {
+                
+                king[index] = (int)(king[index] + (king_end[index] - king[index]) * factor);
+                pawns[index] = (int)(pawns[index] + (pawns_end[index] - pawns[index]) * factor);
+                
+            }           
+
+            foreach (PieceList pieceList in board.GetAllPieceLists())
+            {
+                int[] pieceValues;
+
+                switch (pieceList.TypeOfPieceInList)
+                {
+                    case PieceType.Knight:
+                        pieceValues = knights;
+                        break;
+                    case PieceType.Bishop:
+                        pieceValues = bishops;
+                        break;
+                    case PieceType.Rook:
+                        pieceValues = rooks;
+                        break;
+                    case PieceType.King:
+                        pieceValues = king;
+                        break;
+                    case PieceType.Pawn:
+                        pieceValues = pawns;
+                        break;
+                    default:
+                        continue;
+                }
+
+                foreach (Piece piece in pieceList)
+                {   
+                    int mirroredRow = 7 - piece.Square.Rank;
+                    int mirroredSquareIndex = mirroredRow * 8 + piece.Square.File;
+                    int pieceValue = piece.IsWhite? pieceValues[piece.Square.Index] : pieceValues[mirroredSquareIndex];
+                    score += piece.IsWhite ? pieceValue : -pieceValue;
                 }
             }
 
-            mg = -mg;
-            eg = -eg;
+            return score;
         }
-
-        return (mg * phase + eg * (24 - phase)) / 24 * (board.IsWhiteToMove ? 1 : -1);
-    }
 
     // https://www.chessprogramming.org/Negamax
     // https://www.chessprogramming.org/Quiescence_Search
